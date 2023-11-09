@@ -5,19 +5,21 @@ library(dplyr)
 library(RColorBrewer)
 library(DataExplorer)
 
-### Data Ingestion ###
+##### Data Ingestion ##### 
 
-# Read in the flaps dataset from 2016-2019
+## Read in the flaps dataset from 2016-2019
 setwd("/Users/kathyochoa/Documents/DATA_205/Project/Flaps_CSV")
-flaps2016 <- read.csv("2016_Flap.csv")
-flaps2017 <- read.csv("2017_Flap.csv")
-flaps2018 <- read.csv("2018_Flap.csv")
-flaps2019 <- read.csv("2019_Flap.csv")
+flaps2016 <- read.csv("2016_Flap.csv", na = c("", "NA", "-99"))
+flaps2017 <- read.csv("2017_Flap.csv", na = c("", "NA", "-99"))
+flaps2018 <- read.csv("2018_Flap.csv", na = c("", "NA", "-99"))
+flaps2019 <- read.csv("2019_Flap.csv", na = c("", "NA", "-99"))
 
 
 ## Merge Flaps2016-Flaps2019 based on common columns
+
 # comCols used to merge flaps2016 and flaps2017
 # comCols2 used to merge flaps2016/2017 and 2018/2019
+
 comCols <- c("X.1", "X", "age", "age_neonate", "amonth", "aweekend", 
              "died", "discwt", "dispuniform", "dqtr", "drg", "drgver", 
              "drg_nopoa", "dxver","elective", "female", "hcup_ed", 
@@ -67,20 +69,21 @@ comcols2 <- c("X.1", "X", "age", "age_neonate", "amonth", "aweekend",
               "prday16", "prday17", "prday18", "prday19", "prday20",
               "prday21", "prday22", "prday23", "prday24", "prday25")
 
-# Full join the 4 dataframes
+## Full join the 4 dataframes
 dfJoins <- flaps2016 %>%
   full_join(flaps2017, by = comCols) %>%
   full_join(flaps2018, by = comcols2) %>%
   full_join(flaps2019, by = comcols2)
 
-# Rename the hcup_division column to hosp_division
+## Rename the hcup_division column to hosp_division
 colnames(dfJoins)[18] <- "hosp_division"
 
 
-### Data Wrangling ###
 
-# Create a new dataframe with categorical variables
-# exclude NA's (negative values) 
+##### Data Wrangling ##### 
+
+# Create a new dataframe with categorical variables 
+# and filter according to bounds
 categDf <- dfJoins %>%
   select(amonth, aweekend, died, dispuniform, elective, female, 
          hosp_division, pay1, race, year, zipinc_qrtl) %>%
@@ -165,29 +168,41 @@ for(i in 1:length(incQt)) {
   categDf$zipinc_qrtl[categDf$zipinc_qrtl == i] <- incQt[i]
 }
 
+# Rename column names
+colnames(categDf) <- c("Admission Month", "Admission Weekday", 
+                       "Died/Did not die", "Disposition", "Elective",
+                       "Sex", "Hospital Division", "Primary payer", 
+                       "Race", "Year", "Household Income")
 
 head(categDf)
-head(dfJoins)
 
 
-### Exploratory Data Analysis ###
+
+##### Exploratory Data Analysis ##### 
 
 # Frequency Table for categorical variables
-sapply(categDf, table)
+freqTable <- sapply(categDf, table)
+freqTable
+
+# Proportion Table
+proportTable <- sapply(freqTable, prop.table)
+proportTable
 
 
 ### Statistical testing ###
 # Create a dataframe only for statistical testing
 statTest <- dfJoins %>%
   select(age, los, totchg, aweekend, died, elective, female) %>%
-  filter(age > 0, los > 0, totchg > 0, between(aweekend, 0,1), between(died, 0,1), 
-         between(elective,0,1), between(female,0,1))
+  filter(age > 0, los > 0, totchg > 0, between(aweekend, 0,1), 
+         between(died, 0,1), between(elective,0,1), 
+         between(female,0,1))
 
 # Correlation plot
 plot_correlation(statTest)
 #cor(statTest)
 
-# Multiple Regression Model
+
+# Generalized Linear Model
  # Backwards elimination to analyze the relationship
  # between total charge and several independent variables
 
@@ -209,9 +224,8 @@ ptAAnnualIncidence <- annualIncidence %>%
   theme_minimal(base_size = 12) + 
   geom_line() +
   xlab("Year") +
-  ylab("Annual Incidence")  +
-  scale_y_continuous(labels = label_number(suffix = " K", scale = 1e-3))
-  
+  ylab("Annual Incidence")  
+
 ptAAnnualIncidence
 
 
@@ -229,7 +243,6 @@ ptDMeanCharge <- meanAnnualCharge %>%
   theme_minimal(base_size = 12) + 
   geom_line() +
   xlab("Year") +
-  ylab("Mean Annual Charge($)") +
-  scale_y_continuous(labels = label_number(suffix = " K", scale = 1e-3))
+  ylab("Mean Annual Charge($)") 
 
 ptDMeanCharge 
