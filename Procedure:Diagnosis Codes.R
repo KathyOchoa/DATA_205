@@ -1,8 +1,10 @@
 # Necessary libraries
+library(readxl)
 library(tidyverse)
-library(tidyselect)
 library(dplyr)
-library(rio)
+library(stringi)
+
+##### Data Ingestion ##### 
 
 # Read in the flaps dataset from 2016-2019
 setwd("/Users/kathyochoa/Documents/DATA_205/Project/Flaps_CSV")
@@ -12,10 +14,35 @@ flaps2018 <- read.csv("2018_Flap.csv", na = c("", "NA", "-99"))
 flaps2019 <- read.csv("2019_Flap.csv", na = c("", "NA", "-99"))
 
 # Read in the excel sheet with all the necessary codes
-flapCodes <- read_excel("Timing to Flap Procedure Codes.xlsx")
-fractureCodes <- read_excel("Timing to Flap Procedure Codes.xlsx", 2)
-fixationCodes <- read_excel("Timing to Flap Procedure Codes.xlsx", 3)
+flap_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx")
+fracture_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx", 2)
+fixation_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx", 3)
 
+
+
+##### Data Wrangling ##### 
+
+## Spreadsheets ##
+
+# Rename code columns names
+colnames(flap_Codes)[1] <-"code"
+colnames(flap_Codes)[2] <- "description"
+colnames(fracture_Codes)[1] <- "code"
+colnames(fracture_Codes)[2] <- "description"
+colnames(fixation_Codes)[1] <- "code"
+colnames(fixation_Codes)[2] <- "description"
+
+# Merge the spreadsheets
+codesOfInterest <- full_join(flap_Codes, fixation_Codes, 
+                             by = c("code", "description")) %>%
+  full_join(fracture_Codes, by = c("code", "description"))
+
+# Remove white space or extra characters in code columns
+codesOfInterest$code <- gsub("`", '', codesOfInterest$code, fixed = TRUE)
+codesOfInterest$code <- stri_trim_both(codesOfInterest$code)
+
+
+## Flaps Dataframes ##
 
 ## Merge Flaps2016-Flaps2019 based on common columns
 
@@ -35,105 +62,71 @@ allYears <- flaps2016 %>%
 head(allYears)
 
 
-### Diagnostic Codes ###
+### All Diagnostic and Procedure Codes ###
 
-# Subset only the diagnoses columns
+# Filter all the diagnostic and procedure columns
+checkAll <- allYears %>%
+  select(year, totchg, los, contains("i10_dx"), contains("i10_pr"))
 
-onlyDiagCols <- allYears %>%
-  select(year, contains("i10_dx"))
+head(checkAll)
 
-head(onlyDiagCols)
+# Elongate diagnostic and procedure columns
+dpLong <- pivot_longer(checkAll, cols = -c(year, totchg, los))
 
-## List all the associated diagnosis
+head(dpLong)
 
-diagnoses <- pivot_longer(onlyDiagCols, cols = contains("i10_dx")) %>%
+# Group by codes, count each occurrence, and get the average total charge
+allCodes <- dpLong %>%
   group_by(year, value) %>%
-  filter(value != "I10") %>%
-  summarize(count = n()) %>%
+  filter(value != "I10",
+         totchg > 0,
+         los > 0) %>%
   na.omit() %>%
-  arrange(year, desc(count))
+  summarize(count = n(),
+            avgChg = round(mean(totchg)),
+            avgLos = round(mean(los)))
 
-head(diagnoses)
-
-# Write diagnoses to file
-#write_csv(diagnoses, "associatedDiagnosis.csv")
+head(allCodes)
 
 
-## List the diagnostic fracture codes and their frequency
+## All codes of interest ##
 
-diagnosticCM <- fractureCodes$`Diagnostic codes - CM codes`
+# Filter the codes of interest (from spreadsheet)
+myCodes <- allCodes %>%
+  filter(grepl("0HX|0JX|0PH|0QH", value) |
+         value %in% fracture_Codes$code) %>%
+  mutate(type = case_when(
+    grepl("0PH", value) ~ "Upper Fixation",
+    grepl("0QH", value) ~ "Lower Fixation",
+    grepl("0HX", value) ~ "Skin & Breast Transfer",
+    grepl("0JX", value) ~ "Tissue & Fascia Transfer"
+  ))
 
-onlyFracture <- diagnoses %>%
-  filter(value %in% diagnosticCM)
-
-head(onlyFracture)
-
-# Rename the columns
-colnames(fractureCodes)[1] = "cm_code"
-colnames(fractureCodes)[2] = "description"
-colnames(onlyFracture)[2] = "cm_code"
-
-# Merge the onlyFracture df with the fractureCodes df
-frac_desc <- merge(onlyFracture, fractureCodes, sort=FALSE)
-head(frac_desc)
+head(myCodes)
   
-# Write the fractureCodes to file
-#write_csv(frac_desc, "diagnosticFracture.csv")
+
+# Rename code column in myCodes
+colnames(myCodes)[2] <- "code"
+
+# Remove white space from the codes
+myCodes$code <- stri_trim_both(myCodes$code)
 
 
+# Merge flapcodes and skinTansfer to get the desciption of codes
+finalCodes <- left_join(myCodes, codesOfInterest, by = "code")
 
-### Procedure Codes ###
+write.csv(finalCodes, "Types of Flaps.csv")
 
-# Subset only the procedure columns
+#### Visualizations #####
 
-onlyProcedureCols <- allYears %>%
-  select(year, starts_with("i10_pr"))
+ggplot(data = finalCodes) +
+  geom_bar(aes(x = type), position = "stack")
 
-head(onlyProcedureCols)
-
-# Subset FLAP procedures
-
-flapCodes1 <- flapCodes$`Flap coding`
-
-flapProcedures <- pivot_longer(onlyProcedureCols, cols = contains("i10_pr")) %>%
-  group_by(year, value) %>%
-  summarize(count = n()) %>%
-  na.omit() %>%
-  filter(value %in% c(flapCodes1)) %>%
-  arrange(year, desc(count))
-
-head(flapProcedures)
-
-# Rename columns
-colnames(flapCodes)[1] <-"flap_code"
-colnames(flapCodes)[2] <- "description"
-colnames(flapProcedures)[2] <- "flap_code"
-
-# Merge the flapProcedures df with the flapCodes df
-flap_desc <- merge(flapProcedures, flapCodes, sort = FALSE)
-
-head(flap_desc)
+ggplot(data = finalCodes) +
+  geom_bar(aes(x = type, y = avgChg), position = "stack")
 
 
-# Subset FIXATION procedures
+#### Statistical Analysis #####
 
-fixationCodes1 <- fixationCodes$`Procedural Codes`
-
-fixationProcedures <- pivot_longer(onlyProcedureCols, cols = contains("i10_pr")) %>%
-  group_by(year, value) %>%
-  summarize(count = n()) %>%
-  na.omit() %>%
-  filter(value %in% c(fixationCodes1)) %>%
-  arrange(year, desc(count))
-
-head(fixationProcedures)
-
-# Rename columns
-colnames(fixationCodes)[1] <-"fixation_code"
-colnames(fixationCodes)[2] <- "description"
-colnames(fixationProcedures)[2] <- "fixation_code"
-
-# Merge the flapProcedures df with the flapCodes df
-fixation_desc <- merge(fixationProcedures, fixationCodes, sort = FALSE)
-
-head(fixation_desc)
+model1 <- glm(avgChg ~ avgLos + type, data = finalCodes)
+summary(model1)
