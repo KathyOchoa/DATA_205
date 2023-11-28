@@ -4,6 +4,7 @@ output: html_document
 date: "2023-11-27"
 ---
 
+##### Data Ingestion ##### 
 
 Necessary libraries
 ```{r}
@@ -26,6 +27,7 @@ flaps2019 <- read.csv("2019_Flap.csv", na = c("", "NA"))
 
 Read in the excel sheet with all the necessary codes
 ```{r}
+setwd("/Users/kathyochoa/Documents/DATA_205/Project/Flaps_CSV")
 flap_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx")
 fracture_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx", 2)
 fixation_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx", 3)
@@ -37,21 +39,21 @@ fixation_Codes <- read_excel("Timing to Flap Procedure Codes.xlsx", 3)
 Spreadsheets
 ```{r}
 # Rename code columns names
-colnames(flap_Codes)[1] <-"code"
+colnames(flap_Codes)[1] <-"value"
 colnames(flap_Codes)[2] <- "description"
-colnames(fracture_Codes)[1] <- "code"
+colnames(fracture_Codes)[1] <- "value"
 colnames(fracture_Codes)[2] <- "description"
-colnames(fixation_Codes)[1] <- "code"
+colnames(fixation_Codes)[1] <- "value"
 colnames(fixation_Codes)[2] <- "description"
 
 # Merge the spreadsheets
 codesOfInterest <- full_join(flap_Codes, fixation_Codes, 
-                             by = c("code", "description")) %>%
-  full_join(fracture_Codes, by = c("code", "description"))
+                             by = c("value", "description")) %>%
+  full_join(fracture_Codes, by = c("value", "description"))
 
 # Remove white space or extra characters in code columns
-codesOfInterest$code <- gsub("`", '', codesOfInterest$code, fixed = TRUE)
-codesOfInterest$code <- stri_trim_both(codesOfInterest$code)
+codesOfInterest$value <- gsub("`", '', codesOfInterest$value, fixed = TRUE)
+codesOfInterest$value <- stri_trim_both(codesOfInterest$value)
 ```
 
 
@@ -96,7 +98,7 @@ summary(allYears)
 # Select all the columns of interest
 myCols <- allYears %>%
   select(age, amonth, aweekend, died, dispuniform, elective, female, 
-         hcup_division, i10_ndx, i10_npr, los, pay1, race, totchg, 
+         hcup_division, i10_ndx, i10_npr, key_nis, los, pay1, race, totchg, 
          year, zipinc_qrtl, contains("i10_dx"), contains("i10_pr"))
 
 head(myCols)
@@ -109,29 +111,21 @@ dpLong <- pivot_longer(myCols, cols = contains("i10_dx") | contains("i10_pr"))
 head(dpLong)
 ```
 
-Group by codes used each year
+
 Only look at the codes of interest based on prefix or from spreadsheet:
 Fixation: Upper (0PH) and Lower (0QH)
 Transfer: Skin & Breast (0HX) and Tissue & Fascia (0JX)
+Fracture: List from spreadsheet
 ```{r}
 myCodes <- dpLong %>%
-  group_by(year, value, zipinc_qrtl) %>%
-  filter(value != "I10") %>%
-  na.omit() %>%
   filter(grepl("0HX|0JX|0PH|0QH", value) |
-         value %in% fracture_Codes$code) %>%
-  summarize(count = n(),
-            avgAge = round(mean(age)),
-            avgNdx = round(mean(i10_ndx)),
-            avgNpr = round(mean(i10_npr)),
-            avgChg = round(mean(totchg)),
-            avgLos = round(mean(los))
-            ) %>%
+         value %in% fracture_Codes$value) %>%
   mutate(type = case_when(
     grepl("0PH", value) ~ "Upper Fixation",
     grepl("0QH", value) ~ "Lower Fixation",
     grepl("0HX", value) ~ "Skin & Breast Transfer",
-    grepl("0JX", value) ~ "Tissue & Fascia Transfer"
+    grepl("0JX", value) ~ "Tissue & Fascia Transfer",
+    value %in% fracture_Codes$value ~ "Fracture"
   ))
 
 head(myCodes)
@@ -139,29 +133,43 @@ head(myCodes)
 
 Clean up myCodes and merge with codesOfInterest
 ```{r}
-# Rename code column in myCodes
-colnames(myCodes)[2] <- "code"
-
 # Remove white space from the codes
-myCodes$code <- stri_trim_both(myCodes$code)
+myCodes$value <- stri_trim_both(myCodes$value)
 
 # Merge flapcodes and skinTansfer to get the desciption of codes
-finalCodes <- left_join(myCodes, codesOfInterest, by = "code")
+finalCodes <- left_join(myCodes, codesOfInterest, by = "value")
 ```
 
 
 ```{r}
-#write.csv(finalCodes, "Types of Flaps.csv")
+write.csv(finalCodes, "Types of Flaps.csv")
 ```
 
 
-```{r}
+#### Exploratory Data Analysis #####
 
+
+Look at types of Flaps annually
+```{r}
+byType <- myCodes %>%
+  group_by(type, year) %>%
+  summarize(count = n())
+
+head(byType)
 ```
 
-
 ```{r}
+type_chart <- ggplot(byType, aes(x = year, y = count, color = type)) +
+  labs(title = "Types of Flaps Over the Years") +
+  geom_line() +
+  xlab("Year") +
+  ylab("Frequency") +
+  geom_point() +
+  scale_color_brewer(palette = "Set1") +
+  scale_color_discrete(name = "Type of Flap") +
+  theme_minimal(base_size = 14)
 
+type_chart
 ```
 
 
