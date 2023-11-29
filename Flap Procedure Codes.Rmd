@@ -118,7 +118,7 @@ Transfer: Skin & Breast (0HX) and Tissue & Fascia (0JX)
 Fracture: List from spreadsheet
 ```{r}
 myCodes <- dpLong %>%
-  filter(grepl("0HX|0JX|0PH|0QH", value) |
+  filter(str_starts(value, "0HX|0JX|0PH|0QH") |
          value %in% fracture_Codes$value) %>%
   mutate(type = case_when(
     grepl("0PH", value) ~ "Upper Fixation",
@@ -146,13 +146,138 @@ write.csv(finalCodes, "Types of Flaps.csv")
 ```
 
 
+Create a new dataframe with categorical variables
+```{r}
+categDf <- myCodes %>%
+  select(amonth, aweekend, died, dispuniform, elective, female, 
+         hcup_division, pay1, race, year, zipinc_qrtl)
+
+head(categDf)
+```
+
+Rename categorical variables
+```{r}
+## Categorize amonth ##
+for(i in 1:length(month.name)) {
+  categDf$amonth[categDf$amonth == i] <- month.name[i]
+}
+
+# Reorder the months in consecutive order
+categDf$amonth <- factor(categDf$amonth, levels = month.name)
+
+
+## Categorize aweekend ##
+categDf$aweekend[categDf$aweekend == 0] <- "Mon-Fri"
+categDf$aweekend[categDf$aweekend == 1] <- "Sat-Sun"
+
+
+## Categorize died ##
+categDf$died[categDf$died == 0] <- "Did not die"
+categDf$died[categDf$died == 1] <- "Died"
+
+
+## Categorize dispuniform ##
+dispUni <- c("Routine", "Transfer to short-term hospital", "Transfer Other",
+             "Home Health Care", "Against medical advice", "Died in hospital",
+             "Discharged/transferred to court/law enforcement",
+             "Discharged alive, destination unknown")
+
+categDf$dispuniform[categDf$dispuniform == 1] <- dispUni[1]
+categDf$dispuniform[categDf$dispuniform == 2] <- dispUni[2]
+categDf$dispuniform[categDf$dispuniform == 5] <- dispUni[3]
+categDf$dispuniform[categDf$dispuniform == 6] <- dispUni[4]
+categDf$dispuniform[categDf$dispuniform == 7] <- dispUni[5]
+categDf$dispuniform[categDf$dispuniform == 20] <- dispUni[6]
+categDf$dispuniform[categDf$dispuniform == 21] <- dispUni[7]
+categDf$dispuniform[categDf$dispuniform == 99] <- dispUni[8]
+
+# Reorder disposition
+categDf$dispuniform <- factor(categDf$dispuniform, levels = dispUni)
+
+
+## Categorize elective ##
+categDf$elective[categDf$elective == 0] <- "Non-elective"
+categDf$elective[categDf$elective == 1] <- "Elective"
+
+
+## Categorize female ##
+categDf$female[categDf$female == 0] <- "Male"
+categDf$female[categDf$female == 1] <- "Female"
+
+
+## Categorize hcup_division ##
+hospDiv <- c("New England", "Middle Atlantic", "East North Central",
+             "West North Central", "South Atlantic", "East South Central",
+             "West South Central", "Mountain", "Pacific")
+for (i in 1:length(hospDiv)) {
+  categDf$hcup_division[categDf$hcup_division == i] <- hospDiv[i]
+}
+# Reorder hcup_division
+categDf$hcup_division <- factor(categDf$hcup_division, levels = hospDiv)
+
+
+## Categorize pay1 ##
+pay <- c("Medicare", "Medicaid", "Private insurance", 
+         "Self-pay", "No charge", "Other")
+
+for (i in 1:length(pay)) {
+  categDf$pay1[categDf$pay1 == i] <- pay[i]
+}
+
+# Reorder pay1
+categDf$pay1 <- factor(categDf$pay1, levels = pay)
+
+
+## Categorize race ##
+race <- c("White", "Black", "Hispanic", "Asian or Pacific Islander",
+          "Native American", "Other")
+
+for (i in 1:length(race)) {
+  categDf$race[categDf$race == i] <- race[i]
+}
+
+# Reorder race
+categDf$race <- factor(categDf$race, levels = race)
+
+
+## Categorize zipinc_qrtl ##
+incQt <- c("0-25th percentile", "26th to 50th percentile (median)",
+           "51st to 75th percentile", "76th to 100th percentile")
+for(i in 1:length(incQt)) {
+  categDf$zipinc_qrtl[categDf$zipinc_qrtl == i] <- incQt[i]
+}
+
+head(categDf)
+
+```
+
+Change column names
+```{r}
+colnames(categDf) <- c("Admission Month", "Admission Day", 
+                       "Status", "Disposition", "Elective",
+                       "Sex", "Hospital Division", "Primary Payer", 
+                       "Race", "Year", "Household Income")
+
+
+head(categDf)
+```
+
+
 #### Exploratory Data Analysis #####
+
+```{r}
+freqTab <- categDf %>%
+  map(function(x) table(x))
+
+freqTab
+```
+
 
 
 Look at types of Flaps annually
 ```{r}
 byType <- myCodes %>%
-  group_by(type, year) %>%
+  group_by(type) %>%
   summarize(count = n())
 
 head(byType)
@@ -172,10 +297,6 @@ type_chart <- ggplot(byType, aes(x = year, y = count, color = type)) +
 type_chart
 ```
 
-
-```{r}
-
-```
 
 
 ```{r}
