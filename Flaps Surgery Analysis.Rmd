@@ -1,0 +1,489 @@
+---
+title: "Flaps Surgery Analysis"
+author: "Katherine Ochoa"
+date: "2023-12-15"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+# Data Ingestion #
+
+### Necessary libraries
+```{r}
+library(tidyverse)
+library(dplyr)
+library(stringi)
+library(tinytex)
+library(ggplot2)
+library(janitor)
+library(flextable)
+library(highcharter)
+```
+
+
+Read in the flaps dataset from 2016-2019
+```{r}
+#setwd("C:/Users/kathyochoa/Documents/DATA_205/Project")
+flaps2016 <- read.csv("2016_Flap.csv", na = c("", "NA"))
+flaps2017 <- read.csv("2017_Flap.csv", na = c("", "NA"))
+flaps2018 <- read.csv("2018_Flap.csv", na = c("", "NA"))
+flaps2019 <- read.csv("2019_Flap.csv", na = c("", "NA"))
+```
+
+
+# Data Wrangling # 
+
+
+```{r}
+# comCols used to merge flaps2016 and flaps2017
+# comCols2 used to merge flaps2016/2017 and 2018/2019
+
+comCols1 <- intersect(names(flaps2016), names(flaps2017))
+comCols2 <- intersect(names(flaps2018), names(flaps2019))
+
+# Full join the 4 dataframes
+allYears <- flaps2016 %>%
+  full_join(flaps2017, by = comCols1) %>%
+  full_join(flaps2018, by = comCols2) %>%
+  full_join(flaps2019, by = comCols2)
+
+head(allYears)
+```
+
+Check the summary of allYears
+```{r}
+summary(allYears)
+```
+We can see some variables contain negative values. Is it possible to be negative years old? Why do categorical variables have a -9 value?
+These negative values are actually NA's.
+
+To not skew our data, let's replace these negative values with NA
+```{r}
+allYears[allYears < 0] <- NA
+```
+
+Check the summary once again
+```{r}
+summary(allYears)
+```
+Summary looks good.
+
+
+## Procedure Codes #
+Take the combined dataset and select the procedure columns
+```{r}
+procedures <- allYears %>%
+  select(year, contains("i10_pr"))
+```
+
+Lengthen the procedures column
+```{r}
+procLong <- pivot_longer(procedures, cols = -c(year))
+
+# Remove white space from the codes
+procLong$value <- stri_trim_both(procLong$value)
+
+head(procLong)
+```
+
+
+## Categorical Variables #
+Create new columns for categorical variables
+
+### Admission Month ###
+```{r}
+for(i in 1:length(month.name)) {
+  allYears$month[allYears$amonth == i] <- month.name[i]
+}
+
+# Reorder the months in consecutive order
+allYears$month <- factor(allYears$month, levels = month.name)
+```
+
+### Admission Day ###
+```{r}
+allYears$day[allYears$aweekend == 0] <- "Mon-Fri"
+allYears$day[allYears$aweekend == 1] <- "Sat-Sun"
+```
+
+### Survival Status ###
+```{r}
+allYears$status[allYears$died == 0] <- "Did not die"
+allYears$status[allYears$died == 1] <- "Died"
+```
+
+### Disposition ###
+```{r}
+dispList <- c("Routine", "Transfer to short-term hospital", "Transfer Other", "Home Health Care", "Against medical advice", "Died in hospital", "Discharged/transferred to court/law enforcement", "Discharged alive, destination unknown")
+
+allYears$disposition[allYears$dispuniform == 1] <- dispList[1]
+allYears$disposition[allYears$dispuniform == 2] <- dispList[2]
+allYears$disposition[allYears$dispuniform == 5] <- dispList[3]
+allYears$disposition[allYears$dispuniform == 6] <- dispList[4]
+allYears$disposition[allYears$dispuniform == 7] <- dispList[5]
+allYears$disposition[allYears$dispuniform == 20] <- dispList[6]
+allYears$disposition[allYears$dispuniform == 21] <- dispList[7]
+allYears$disposition[allYears$dispuniform == 99] <- dispList[8]
+
+# Reorder disposition
+allYears$disposition <- factor(allYears$disposition, levels = dispList)
+```
+
+### Discharge Quarter ###
+```{r}
+qtrList <- c("1st: Jan - Mar", "2nd: Apr - Jun", "3rd: Jul - Sep", "4th: Oct - Dec")
+for(i in 1:length(qtrList)) {
+  allYears$disQtr[allYears$dqtr == i] <- qtrList[i]
+}
+
+# Reorder disQtr
+allYears$disQtr <- factor(allYears$disQtr, levels = qtrList)
+```
+
+### Elective Status ###
+```{r}
+allYears$electiveStr[allYears$elective == 0] <- "Non-elective"
+allYears$electiveStr[allYears$elective == 1] <- "Elective"
+```
+
+### Patient Sex ###
+```{r}
+allYears$sex[allYears$female == 0] <- "Male"
+allYears$sex[allYears$female == 1] <- "Female"
+```
+
+### Hospital Division ###
+```{r}
+divList <- c("New England", "Middle Atlantic", "East North Central",  "West North Central", "South Atlantic", "East South Central", "West South Central", "Mountain", "Pacific")
+
+for (i in 1:length(divList)) {
+  allYears$division[allYears$hcup_division == i] <- divList[i]
+}
+
+# Reorder division
+allYears$division <- factor(allYears$division, levels = divList)
+```
+
+### Primary Payer ###
+```{r}
+payList <- c("Medicare", "Medicaid", "Private insurance", 
+         "Self-pay", "No charge", "Other")
+
+for (i in 1:length(payList)) {
+  allYears$payer[allYears$pay1 == i] <- payList[i]
+}
+
+# Reorder payer
+allYears$payer <- factor(allYears$payer, levels = payList)
+```
+
+### Patient Race ###
+```{r}
+raceList <- c("White", "Black", "Hispanic", "Asian or Pacific Islander", "Native American", "Other")
+
+for (i in 1:length(raceList)) {
+  allYears$raceStr[allYears$race == i] <- raceList[i]
+}
+
+# Reorder raceStr
+allYears$raceStr <- factor(allYears$raceStr, levels = raceList)
+```
+
+### Patient Household Income ###
+```{r}
+incomeList <- c("0-25th percentile", "26th to 50th percentile (median)", "51st to 75th percentile", "76th to 100th percentile")
+
+for(i in 1:length(incomeList)) {
+  allYears$income[allYears$zipinc_qrtl == i] <- incomeList[i]
+}
+```
+
+
+# Exploratory Data Analysis
+
+## General: Annual Incidence ##
+Take the combined dataset, group by the year, then count the number of surgeries
+```{r}
+annualIncidence <- allYears %>%
+  group_by(year) %>%
+  summarize(count = n())
+```
+
+Plot the annual incidence as a line chart
+```{r}
+annualIncidencePlot <- annualIncidence %>% 
+  ggplot(aes(x = year, y = count)) +
+  ggtitle("Annual Flaps Incidence") +
+  theme_minimal(base_size = 12) + 
+  geom_line() +
+  xlab("Year") +
+  ylab("Annual Incidence") +
+  ylim(0, 70000)
+
+annualIncidencePlot
+```
+
+There was a steady increase of flaps surgeries from 2016 - 2019.
+This is most likely correlated to the population increase in the U.S.
+
+
+## General: Mean Annual Charge ($) ##
+Take the combined dataset, group by the year, then calculate the average annual charge
+```{r}
+annualCharge <- allYears %>%
+  filter(totchg > 0) %>%
+  group_by(year) %>%
+  summarize(avgCharge = round(mean(totchg)))
+```
+
+```{r}
+annualChargePlot <- annualCharge %>%
+  ggplot(aes(x = year, y = avgCharge)) +
+  ggtitle("Mean Annual Total Charges of Procedures") +
+  theme_minimal(base_size = 12) + 
+  geom_line() +
+  scale_y_continuous(labels = scales::dollar_format(scale = 0.001, suffix = "K")) +
+  xlab("Year") +
+  ylab("Mean Annual Charge") +
+  expand_limits(y = 0)
+
+annualChargePlot
+```
+
+There was a steady increase in the average cost of flaps surgeries from 2016 - 2019. From 2018-2019, there was a sharper increase in cost compared to the previous years. 
+This is most likely as a result of the raising inflation rate and sharper inflation from 2018-2019.
+
+
+## General: Highchart Combining Annual Incidence & Average Charge ##
+```{r}
+myChart <- highchart() %>%
+  hc_plotOptions (
+   series = list (animation = FALSE)
+  )%>%
+  hc_yAxis_multiples(
+    list(title = list(text = "Annual Incidence")),
+    list(title = list(text = "Average Cost ($)"),
+         opposite = TRUE)
+  ) %>%
+  hc_add_series(data = annualIncidence$count,
+                name = "Annual Incidence",
+                type = "column",
+                yAxis = 0) %>%
+  hc_add_series(data = annualCharge$avgCharge,
+                name = "Average Cost ($)",
+                type = "line",
+                yAxis = 1) %>%
+  hc_xAxis(categories = annualIncidence$year) %>%
+  hc_colors(c("black", "blue"))  %>%
+  hc_title(text = "Annual Incidence Vs Mean Annual Charge of Flaps Procedures")
+
+myChart
+```
+
+
+## Patient Demographics ##
+
+Box plot: Race and age
+```{r}
+plot1 <- allYears %>%
+  filter(raceStr != "NA") %>%
+  ggplot(aes(x = raceStr, y = age, group = raceStr, fill = raceStr)) +
+  geom_boxplot() +
+  ggtitle("Median Age Among all Races \nis between 50-60 Years") +
+  xlab("Race") +
+  ylab("Age") +
+  scale_y_continuous(breaks = seq(0,100, by=10)) +
+  scale_fill_discrete(name = "Race") +
+  theme(axis.text.x = element_text(angle = 25))
+
+plot1
+```
+
+The median age of patients throughout the racial groups lies between 50 and 60 years old with White patients on the higher end and Native Americans on the lower end. 
+
+
+Frequency Table: Race and sex
+```{r}
+sexVrace <- table(allYears$raceStr, allYears$sex) %>%
+  prop.table(margin = 1) %>%
+  as.data.frame() %>%
+  arrange(Var1)
+
+tab1 <- flextable(sexVrace)
+tab1 <- set_header_labels(tab1, Var1 = "Race", Var2 = "Sex", Freq = "Obs.(%)")
+tab1
+```
+
+With the exception of Asian/Pacific Islander, over 50% of patients in each racial group were male.
+
+
+## Procedures ##
+
+Bar Chart: ICD-10 Codes
+```{r}
+byValue <- procLong %>%
+  na.omit() %>%
+  group_by(value) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10) %>%
+  ggplot(aes(x = value, y = count, fill = value)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Top 10 Flap Procedure ICD-10 Codes") +
+  xlab("ICD-10 Code") +
+  ylab("Number of procedures") +
+  theme_classic() +
+  scale_fill_discrete(name = "ICD-10 Code") +
+  theme(axis.text.x = element_text(face = "bold", 
+                                   size = 7, angle = 10))
+byValue
+```
+
+Most of the associated procedures contained the prefix “0JB” which are classified as tissue and fascia excision
+
+
+# Statistical Analysis & Final Product
+
+## Statistical Analysis ##
+
+### GLM: Annual Incidence ###
+```{r}
+lmFit1 <- glm(count ~ year, data = annualIncidence)
+summary(lmFit1)
+```
+
+Count is the response variable and year is predictor variable
+We are 95% confident that the actual slope lies within (1016, 1568)
+Annual incidence is increasing at a rate of 1,292 surgeries
+Formula: y = 1292x - 2545754
+
+```{r}
+summary(annualIncidence$count - lmFit1$fitted.values)
+```
+Distribution is slightly right-skewed
+
+
+### GLM: Mean annual charge ###
+```{r}
+lmFit2 <- glm(avgCharge ~ year, data = annualCharge)
+summary(lmFit2)
+```
+Average charge is the response variable and year is the predictor variable
+We are 95% confident that the actual slope lies within ($5702, $7764)
+Mean annual charge is increasing at a rate of $6733
+Formula: y = 6733x - 13457644
+
+```{r}
+summary(annualCharge$avgCharge - lmFit2$fitted.values)
+```
+Distribution is slightly right-skewed
+
+
+### GLM: Patient Survival ###
+
+What predictor variables are statistically significant when evaluating a patient's chance of survival?
+```{r}
+dieGLM <- glm(died ~ year + female + race + age + i10_ndx + i10_npr + hcup_division + zipinc_qrtl, data = allYears, family = binomial)
+
+summary(dieGLM)
+```
+Died is the response variable and year, sex, race, age, length of stay, number of diagnoses, number of procedures, hospital division and household income are the response variables.
+At an alpha level of 0.05, hospital division is not statistically significant and sex is only slightly significant. All other variables are statistically significant.
+
+
+What is the best model for patient survival?
+Sex?
+```{r}
+die1 <- glm(died ~ female, data = allYears, family = binomial)
+
+summary(die1)
+```
+AIC: 41804
+
+Race?
+```{r}
+die2 <- glm(died ~ race, data = allYears, family = binomial)
+
+summary(die2)
+```
+AIC: 40257
+
+Age?
+```{r}
+die3 <- glm(died ~ age, data = allYears, family = binomial)
+
+summary(die3)
+```
+AIC: 40385
+
+Hospital Division?
+```{r}
+die4 <- glm(died ~ hcup_division, data = allYears, family = binomial)
+
+summary(die4)
+```
+AIC: 41808
+
+Household Income?
+```{r}
+die5 <- glm(died ~ zipinc_qrtl, data = allYears, family = binomial)
+
+summary(die5)
+```
+AIC: 40919
+
+Of the 5 models, race has the lowest AIC and hospital division has the highest AIC. 
+Race is the best predictor variable to model a patient's likelihood of survival and hospital division is least efficient predictor variable.
+
+
+## Final Product ##
+
+```{r}
+mostExpensive <- allYears %>%
+  select(X, year, i10_ndx, i10_npr, i10_pr1, totchg) %>%
+  na.omit() %>%
+  filter((totchg > 900000) & (i10_npr == 1))  %>%
+  group_by(i10_pr1) %>%
+  summarize(count = n(),
+            chgSum = sum(totchg),
+            avgChg = chgSum/count,
+            diagSum = sum(i10_ndx),
+            avgDiag = round(diagSum / count))
+
+mostExpensive
+```
+
+```{r}
+myExpensiveChart <- highchart() %>%
+  hc_yAxis_multiples(
+    list(title = list(text = "Average Number of Diagnoses")),
+    list(title = list(text = "Average Cost of Procedure ($)"),
+         opposite = TRUE)
+  ) %>%
+  hc_add_series(data = mostExpensive$avgDiag,
+                name = "Average Number of Diagnoses",
+                type = "column",
+                yAxis = 0) %>%
+  hc_add_series(data = mostExpensive$avgChg,
+                name = "Average Cost of Procedure ($)",
+                type = "line",
+                yAxis = 1) %>%
+  hc_xAxis(categories = mostExpensive$i10_pr1) %>%
+  hc_colors(c("red", "green")) %>%
+  hc_chart(style = list(fontFamily = "Georgia",
+                        fontWeight = "bold")) %>%
+  hc_title(text = "Most Expensive Procedures & Their Associated Average Number of Diagnoses") 
+
+myExpensiveChart
+```
+
+The codes with the prefix “0JB”, tissue and fascia excision, tend to be among the most expensive procedural codes.
+Codes with the prefix “0HB”, Skin Excision, come in second.
+
+
+# Conclusion: Data Story
+
+With medicine growing faster than the average person can understand, it’s important for data scientists to gather medical data and present it in a way that the average person, especially policy makers, can understand. Over the years, the popularity of flap surgeries continues to grow and along with it, their cost. At a time when inflation is skyrocketing and people can hardly afford basic groceries, our quest to put patient care above profits should never end. To improve patient care throughout the nation, we must first understand who our patients are. Through analysis, we have found that a majority of flap sugery patients are within the 40 to 70 age bracket, with a majority of male patients across most racial groups. We’ve also discovered that skin and fascia incision are among the most common primary procedure and are also among the most expensive. In examining patient’s survival, we discovered that race plays a big role and hospital division does not. While it is good news that a hospital’s division does not affect a patient’s survival, it is quite concerning that a patient’s household income is statistically significant in predicting a patient’s survival. Ideally, economic status should never impact a patient’s care, especially their ability to live.
+
